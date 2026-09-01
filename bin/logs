@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+source "$(dirname "$0")/lib.sh"
+
+follow=false
+tail_lines=200
+requested=()
+while (($#)); do
+  case "$1" in
+    -f|--follow)
+      follow=true
+      shift
+      ;;
+    -n|--tail)
+      [[ $# -ge 2 ]] || { echo "选项 $1 需要行数。" >&2; exit 2; }
+      tail_lines="$2"
+      shift 2
+      ;;
+    *)
+      requested+=("$1")
+      shift
+      ;;
+  esac
+done
+
+[[ "${tail_lines}" =~ ^[0-9]+$ ]] || { echo "日志行数必须是整数。" >&2; exit 2; }
+load_env
+require_docker
+targets=()
+resolve_services targets "${requested[@]}"
+arguments=(logs --tail "${tail_lines}")
+[[ "${follow}" == true ]] && arguments+=(-f)
+arguments+=("${targets[@]}")
+dc "${arguments[@]}"

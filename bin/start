@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+source "$(dirname "$0")/lib.sh"
+
+pull=false
+requested=()
+for argument in "$@"; do
+  case "${argument}" in
+    --pull) pull=true ;;
+    *) requested+=("${argument}") ;;
+  esac
+done
+
+load_env
+require_docker
+targets=()
+resolve_services targets "${requested[@]}"
+ensure_volumes "${targets[@]}"
+dc_all config --quiet
+
+if [[ "${pull}" == true ]]; then
+  dc pull "${targets[@]}"
+fi
+
+dc up -d --wait --wait-timeout 240 "${targets[@]}"
+ensure_s3_bucket "${targets[@]}"
+print_service_table "${targets[@]}"

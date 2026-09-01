@@ -1,0 +1,184 @@
+name: dev
+
+x-service-defaults: &service-defaults
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options:
+      max-size: 10m
+      max-file: "3"
+
+services:
+  mysql:
+    <<: *service-defaults
+    image: mysql:${MYSQL_VERSION}
+    ports:
+      - "${BIND_HOST}:${MYSQL_PORT}:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_ROOT_HOST: "%"
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      TZ: ${TZ}
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./config/mysql/my.cnf:/etc/mysql/conf.d/zz-dev.cnf:ro
+      - ./init/mysql:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    mem_limit: 512m
+
+  postgres:
+    <<: *service-defaults
+    image: postgres:${POSTGRES_VERSION}
+    ports:
+      - "${BIND_HOST}:${POSTGRES_PORT}:5432"
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C.UTF-8"
+      PGDATA: /var/lib/postgresql/data
+      TZ: ${TZ}
+    command: ["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf"]
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./config/postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+      - ./init/postgres:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    mem_limit: 384m
+
+  redis:
+    <<: *service-defaults
+    image: redis:${REDIS_VERSION}
+    ports:
+      - "${BIND_HOST}:${REDIS_PORT}:6379"
+    command: ["redis-server", "/usr/local/etc/redis/redis.conf"]
+    volumes:
+      - redis_data:/data
+      - ./config/redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    mem_limit: 192m
+
+  kafka:
+    <<: *service-defaults
+    image: apache/kafka:${KAFKA_VERSION}
+    hostname: kafka
+    ports:
+      - "${BIND_HOST}:${KAFKA_PORT}:9092"
+    env_file:
+      - ./config/kafka/kafka.env
+    environment:
+      CLUSTER_ID: ${KAFKA_CLUSTER_ID}
+      KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT_HOST://${KAFKA_ADVERTISED_HOST}:${KAFKA_PORT},PLAINTEXT://kafka:19092"
+      KAFKA_HEAP_OPTS: "-Xms256m -Xmx384m"
+      TZ: ${TZ}
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:19092 --list >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 45s
+    mem_limit: 640m
+
+  s3-permissions:
+    profiles: ["optional"]
+    image: rustfs/rustfs:${RUSTFS_VERSION}
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["chown -R 10001:10001 /data"]
+    volumes:
+      - s3_data:/data
+    restart: "no"
+
+  s3:
+    <<: *service-defaults
+    profiles: ["optional"]
+    image: rustfs/rustfs:${RUSTFS_VERSION}
+    depends_on:
+      s3-permissions:
+        condition: service_completed_successfully
+    ports:
+      - "${BIND_HOST}:${S3_PORT}:9000"
+      - "${BIND_HOST}:${S3_ADMIN_PORT}:9001"
+    environment:
+      RUSTFS_VOLUMES: /data/rustfs0
+      RUSTFS_ADDRESS: 0.0.0.0:9000
+      RUSTFS_CONSOLE_ADDRESS: 0.0.0.0:9001
+      RUSTFS_CONSOLE_ENABLE: "true"
+      RUSTFS_CONSOLE_CORS_ALLOWED_ORIGINS: "*"
+      RUSTFS_ACCESS_KEY: ${S3_ACCESS_KEY}
+      RUSTFS_SECRET_KEY: ${S3_SECRET_KEY}
+      RUSTFS_OBS_LOGGER_LEVEL: info
+      TZ: ${TZ}
+    volumes:
+      - s3_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:9000/health && curl -fsS http://127.0.0.1:9001/rustfs/console/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    mem_limit: 512m
+
+  s3-client:
+    profiles: ["optional"]
+    image: rustfs/rc:${RUSTFS_RC_VERSION}
+    environment:
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY}
+      S3_SECRET_KEY: ${S3_SECRET_KEY}
+      S3_BUCKET: ${S3_BUCKET}
+      S3_REGION: ${S3_REGION}
+    restart: "no"
+
+  mailpit:
+    <<: *service-defaults
+    profiles: ["optional"]
+    image: axllent/mailpit:${MAILPIT_VERSION}
+    ports:
+      - "${BIND_HOST}:${MAILPIT_SMTP_PORT}:1025"
+      - "${BIND_HOST}:${MAILPIT_UI_PORT}:8025"
+    environment:
+      MP_DATABASE: /data/mailpit.db
+      MP_MAX_MESSAGES: ${MAILPIT_MAX_MESSAGES}
+      MP_DISABLE_VERSION_CHECK: "true"
+      TZ: ${TZ}
+    volumes:
+      - mailpit_data:/data
+    mem_limit: 128m
+
+volumes:
+  mysql_data:
+    name: ${MYSQL_DATA_VOLUME}
+    external: true
+  postgres_data:
+    name: ${POSTGRES_DATA_VOLUME}
+    external: true
+  redis_data:
+    name: ${REDIS_DATA_VOLUME}
+    external: true
+  kafka_data:
+    name: ${KAFKA_DATA_VOLUME}
+    external: true
+  s3_data:
+    name: ${S3_DATA_VOLUME}
+    external: true
+  mailpit_data:
+    name: ${MAILPIT_DATA_VOLUME}
+    external: true

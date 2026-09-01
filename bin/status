@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+source "$(dirname "$0")/lib.sh"
+
+load_env
+targets=()
+resolve_services targets "$@"
+if ! command -v docker >/dev/null 2>&1 || ! docker info >/dev/null 2>&1; then
+  print_service_catalog "Docker 未运行" "${targets[@]}"
+  echo
+  echo "请启动 Docker Desktop 后再执行服务操作。" >&2
+  exit 1
+fi
+require_docker
+print_service_table "${targets[@]}"
+echo
+echo "连接账号：dev-infra info [服务]"

@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+source "$(dirname "$0")/lib.sh"
+
+load_env
+require_docker
+targets=()
+resolve_services targets "$@"
+remove_targets=("${targets[@]}")
+if service_requested s3 "${targets[@]}"; then
+  remove_targets+=(s3-permissions)
+fi
+
+dc rm -f -s "${remove_targets[@]}"
+echo "容器已删除，Docker named volume 和数据库数据均已保留。"
+print_service_table "${targets[@]}"

@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+source "$(dirname "$0")/lib.sh"
+
+load_env
+targets=()
+resolve_services targets "$@"
+if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+  print_service_table "${targets[@]}"
+else
+  print_service_catalog "Docker 未运行" "${targets[@]}"
+fi

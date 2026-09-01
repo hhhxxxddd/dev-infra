@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+source "$(dirname "$0")/lib.sh"
+
+load_env
+require_docker
+targets=()
+resolve_services targets "$@"
+ensure_volumes "${targets[@]}"
+
+for service in "${targets[@]}"; do
+  if [[ "${service}" == mysql || "${service}" == postgres ]]; then
+    "${ROOT_DIR}/bin/backup" "${service}"
+  fi
+done
+
+dc_all config --quiet
+dc pull "${targets[@]}"
+dc up -d --wait --wait-timeout 240 "${targets[@]}"
+ensure_s3_bucket "${targets[@]}"
+print_service_table "${targets[@]}"

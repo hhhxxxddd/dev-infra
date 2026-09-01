@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
+ROOT_DIR="$(cd "$(dirname "${SCRIPT_PATH}")" && pwd)"
+command_name="${1:-status}"
+if (($#)); then
+  shift
+fi
+
+show_help() {
+  cat <<'EOF'
+dev-infra - Windows / WSL 共用的本地开发中间件管理工具
+
+查看：
+  dev-infra                         显示全部服务状态
+  dev-infra list                    显示服务、用途、状态和地址
+  dev-infra info [服务|分组]        显示连接账号与使用信息
+  dev-infra doctor                  检查 Docker、配置和端口
+
+运行：
+  dev-infra start [服务|分组]       启动服务；默认 all
+  dev-infra stop [服务|分组]        停止服务；默认 all
+  dev-infra restart [服务|分组]     重建并重启服务
+  dev-infra remove [服务|分组]      删除容器但保留数据卷
+  dev-infra logs [服务|分组] [-f]   查看日志；-f 持续跟踪
+
+维护：
+  dev-infra update [服务|分组]      备份数据库、拉取镜像并重建
+  dev-infra backup [all|mysql|postgres]
+  dev-infra reset <服务> [--yes]    删除一个服务的数据卷并重建
+  dev-infra open s3|mailpit          打开 Web 管理界面
+  dev-infra compose <参数...>        直接调用本项目 Docker Compose
+
+服务：mysql postgres redis kafka s3 mailpit
+分组：core（前四项） extra（s3、mailpit） all
+
+EOF
+}
+
+show_command_help() {
+  case "$1" in
+    start) echo "用法：dev-infra start [--pull] [服务|core|extra|all ...]" ;;
+    stop) echo "用法：dev-infra stop [服务|core|extra|all ...]" ;;
+    restart) echo "用法：dev-infra restart [服务|core|extra|all ...]" ;;
+    remove) echo "用法：dev-infra remove [服务|core|extra|all ...]（保留数据卷）" ;;
+    status|list) echo "用法：dev-infra $1 [服务|core|extra|all ...]" ;;
+    info) echo "用法：dev-infra info [服务|core|extra|all ...]" ;;
+    logs) echo "用法：dev-infra logs [服务|core|extra|all ...] [-f] [-n 行数]" ;;
+    update) echo "用法：dev-infra update [服务|core|extra|all ...]" ;;
+    backup) echo "用法：dev-infra backup [all|mysql|postgres]" ;;
+    reset) echo "用法：dev-infra reset <服务> [--yes]" ;;
+    doctor) echo "用法：dev-infra doctor" ;;
+    open) echo "用法：dev-infra open s3|mailpit" ;;
+    compose) echo "用法：dev-infra compose <docker compose 参数...>" ;;
+    *) show_help ;;
+  esac
+}
+
+if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+  show_command_help "${command_name}"
+  exit 0
+fi
+
+case "${command_name}" in
+  help|-h|--help)
+    if (($#)); then show_command_help "$1"; else show_help; fi
+    ;;
+  start|stop|restart|remove|status|list|info|logs|update|backup|reset|doctor|open|compose)
+    exec "${ROOT_DIR}/bin/${command_name}" "$@"
+    ;;
+  *)
+    echo "未知命令：${command_name}。运行 dev-infra help 查看用法。" >&2
+    exit 2
+    ;;
+esac

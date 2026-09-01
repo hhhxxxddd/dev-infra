@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+source "$(dirname "$0")/lib.sh"
+
+load_env
+case "${1:-}" in
+  s3) url="http://${BIND_HOST}:${S3_ADMIN_PORT}/rustfs/console/index.html" ;;
+  mailpit) url="http://${BIND_HOST}:${MAILPIT_UI_PORT}" ;;
+  *) echo "用法：dev-infra open s3|mailpit" >&2; exit 2 ;;
+esac
+
+if command -v explorer.exe >/dev/null 2>&1; then
+  explorer.exe "${url}" >/dev/null 2>&1 &
+else
+  echo "${url}"
+fi

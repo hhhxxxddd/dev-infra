@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+source "$(dirname "$0")/lib.sh"
+
+load_env
+require_docker
+umask 077
+mkdir -p "${ROOT_DIR}/backup"
+
+target="${1:-all}"
+[[ "${target}" == all || "${target}" == mysql || "${target}" == postgres ]] || {
+  echo "用法：dev-infra backup [all|mysql|postgres]" >&2
+  exit 2
+}
+
+stamp="$(date +%Y%m%d-%H%M%S)"
+
+backup_mysql() {
+  if ! is_running mysql; then
+    echo "MySQL 未运行，跳过备份。"
+    return
+  fi
+  local output="${ROOT_DIR}/backup/mysql-${stamp}.sql.gz"
+  local temp="${output}.tmp"
+  dc exec -T -e MYSQL_PWD="${MYSQL_ROOT_PASSWORD}" mysql \
+    mysqldump -uroot --all-databases --routines --events --triggers --single-transaction \
+    | gzip -9 >"${temp}"
+  mv "${temp}" "${output}"
+  echo "已创建 ${output}"
+}
+
+backup_postgres() {
+  if ! is_running postgres; then
+    echo "PostgreSQL 未运行，跳过备份。"
+    return
+  fi
+  local output="${ROOT_DIR}/backup/postgres-${stamp}.sql.gz"
+  local temp="${output}.tmp"
+  dc exec -T postgres pg_dumpall -U "${POSTGRES_USER}" | gzip -9 >"${temp}"
+  mv "${temp}" "${output}"
+  echo "已创建 ${output}"
+}
+
+[[ "${target}" == all || "${target}" == mysql ]] && backup_mysql
+[[ "${target}" == all || "${target}" == postgres ]] && backup_postgres

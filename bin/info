@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+source "$(dirname "$0")/lib.sh"
+
+load_env
+targets=()
+resolve_services targets "$@"
+print_connections "${targets[@]}"
