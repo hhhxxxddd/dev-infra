@@ -1,3 +1,4 @@
 .env
 backup/*
 !backup/.gitkeep
+__pycache__/

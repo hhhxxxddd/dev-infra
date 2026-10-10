@@ -9,7 +9,7 @@ Desktop，配置与脚本安装在 WSL `/opt/dev-infra`，PowerShell 命令透�
 | 服务 | 用途 | 默认宿主端口 |
 | --- | --- | ---: |
 | MySQL 8.4 | 关系型数据库 | `23306` |
-| PostgreSQL 17 | 关系型数据库 | `25432` |
+| PostgreSQL 18 | 关系型数据库 | `25432` |
 | Redis 8 | 缓存与键值存储 | `26379` |
 | Kafka | 事件流与消息平台 | `29092` |
 | RustFS | S3 兼容对象存储 | `28333` / `28346` |
@@ -22,7 +22,7 @@ Docker named volume 中，重建或删除容器不会删除数据卷。
 
 - Windows 11 与 WSL 2 Ubuntu。
 - Docker Desktop，并为 Ubuntu 启用 WSL Integration。
-- WSL 中提供 Bash、`rsync` 和 Docker Desktop 挂载的 Docker CLI。
+- WSL 中提供 Bash、`rsync`、`curl`、`jq` 和 Docker Desktop 挂载的 Docker CLI。
 
 ## 安装
 
@@ -76,6 +76,9 @@ dev-infra update redis
 dev-infra backup all
 dev-infra reset redis --yes        # 删除 Redis 数据卷并重建
 dev-infra doctor
+dev-infra outdated               # 只读检查版本与镜像更新
+dev-infra outdated --json        # 结构化输出；查询失败时保留其余结果
+dev-infra update --no-backup all  # 显式跳过数据库备份
 dev-infra open s3
 dev-infra open mailpit
 ```
@@ -120,6 +123,34 @@ Mailpit UI  http://127.0.0.1:28025
 
 修改 `.env` 或 Compose 后运行 `dev-infra restart [服务]`。修改数据库密码不会自动修改已有
 数据卷中的账号；应在数据库内修改，或在数据可丢弃时运行 `reset`。
+
+## 更新与迁移
+
+`outdated` 通过 Docker Hub 元数据检查本机镜像和稳定版本，不拉取镜像、创建配置或修改
+服务。MySQL 检查当前 LTS 分支，PostgreSQL、Redis、Kafka、RustFS、Mailpit 检查当前主版本，
+RustFS 客户端检查当前次版本。固定标签的新版本需要先修改 `versions.env` 并重新安装；
+`update` 拉取已配置的标签，并同步更新 S3 客户端。更新默认备份 MySQL 和 PostgreSQL；
+仅显式 `--no-backup` 跳过备份。
+
+PostgreSQL 18 使用独立的 `dev-infra-postgres18-data` 卷，挂载到 `/var/lib/postgresql`，
+实际数据位于镜像默认的 `/var/lib/postgresql/18/docker`。现有 PostgreSQL 17 数据需要通过
+`pg_upgrade` 或逻辑迁移转入新卷；修改镜像版本和卷名不会自动迁移旧数据。
+
+安装器会将服务配置设为 `0644`，避免 Windows 源码同步后的 `0777` 权限导致 MySQL 忽略
+配置。`doctor` 会检查这个权限。
+
+## 验证
+
+在 WSL 中使用 Python 3 和 ShellCheck 执行隔离测试与脚本检查：
+
+```bash
+python3 -m unittest discover -v tests
+bash -n dev-infra
+for script in bin/* scripts/*.sh; do bash -n "$script"; done
+shellcheck -x -P bin dev-infra bin/* scripts/*.sh
+```
+
+测试使用临时配置和模拟 Docker、Docker Hub，不修改本机服务、镜像或数据卷。
 
 ## 卸载入口
 

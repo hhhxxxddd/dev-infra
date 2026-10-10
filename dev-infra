@@ -17,6 +17,7 @@ dev-infra - Windows / WSL 共用的本地开发中间件管理工具
   dev-infra list                    显示服务、用途、状态和地址
   dev-infra info [服务|分组]        显示连接账号与使用信息
   dev-infra doctor                  检查 Docker、配置和端口
+  dev-infra outdated [服务|分组]    只读检查版本和镜像更新
 
 运行：
   dev-infra start [服务|分组]       启动服务；默认 all
@@ -27,6 +28,7 @@ dev-infra - Windows / WSL 共用的本地开发中间件管理工具
 
 维护：
   dev-infra update [服务|分组]      备份数据库、拉取镜像并重建
+    --no-backup                     显式跳过数据库备份
   dev-infra backup [all|mysql|postgres]
   dev-infra reset <服务> [--yes]    删除一个服务的数据卷并重建
   dev-infra open s3|mailpit          打开 Web 管理界面
@@ -47,7 +49,8 @@ show_command_help() {
     status|list) echo "用法：dev-infra $1 [服务|core|extra|all ...]" ;;
     info) echo "用法：dev-infra info [服务|core|extra|all ...]" ;;
     logs) echo "用法：dev-infra logs [服务|core|extra|all ...] [-f] [-n 行数]" ;;
-    update) echo "用法：dev-infra update [服务|core|extra|all ...]" ;;
+    update) echo "用法：dev-infra update [--no-backup] [服务|core|extra|all ...]" ;;
+    outdated) echo "用法：dev-infra outdated [--json] [服务|core|extra|all ...]（只读查询）" ;;
     backup) echo "用法：dev-infra backup [all|mysql|postgres]" ;;
     reset) echo "用法：dev-infra reset <服务> [--yes]" ;;
     doctor) echo "用法：dev-infra doctor" ;;
@@ -66,7 +69,7 @@ case "${command_name}" in
   help|-h|--help)
     if (($#)); then show_command_help "$1"; else show_help; fi
     ;;
-  start|stop|restart|remove|status|list|info|logs|update|backup|reset|doctor|open|compose)
+  start|stop|restart|remove|status|list|info|logs|update|outdated|backup|reset|doctor|open|compose)
     exec "${ROOT_DIR}/bin/${command_name}" "$@"
     ;;
   *)

@@ -19,19 +19,23 @@ ensure_env() {
 }
 
 load_env() {
-  ensure_env
+  [[ "${1:-}" == --read-only ]] || ensure_env
+  local preferences_file="${ENV_FILE}"
+  [[ -f "${preferences_file}" ]] || preferences_file="${ROOT_DIR}/.env.example"
   set -a
   # shellcheck disable=SC1090
   source "${VERSIONS_FILE}"
   # shellcheck disable=SC1090
-  source "${ENV_FILE}"
+  source "${preferences_file}"
   set +a
 }
 
 dc() {
+  local preferences_file="${ENV_FILE}"
+  [[ -f "${preferences_file}" ]] || preferences_file="${ROOT_DIR}/.env.example"
   docker compose \
     --env-file "${VERSIONS_FILE}" \
-    --env-file "${ENV_FILE}" \
+    --env-file "${preferences_file}" \
     -f "${COMPOSE_FILE}" "$@"
 }
 

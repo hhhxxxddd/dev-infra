@@ -9,14 +9,17 @@ fi
 source_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 install_root=/opt/dev-infra
 
-command -v rsync >/dev/null 2>&1 || {
-  echo "缺少 rsync，请先执行：apt install rsync" >&2
-  exit 1
-}
+for dependency in rsync curl jq; do
+  command -v "${dependency}" >/dev/null 2>&1 || {
+    echo "缺少 ${dependency}，请先执行：apt install rsync curl jq" >&2
+    exit 1
+  }
+done
 
 mkdir -p "${install_root}" "${install_root}/backup"
 rsync -a --delete \
   --exclude '.git/' \
+  --exclude '__pycache__/' \
   --exclude '.env' \
   --exclude 'backup/' \
   "${source_root}/" "${install_root}/"
@@ -27,6 +30,10 @@ if [[ ! -f "${install_root}/.env" ]]; then
 fi
 
 chmod 0755 "${install_root}/dev-infra" "${install_root}"/bin/*
+# Windows checkouts can report mode 0777. MySQL ignores world-writable configs.
+chmod 0644 "${install_root}"/config/mysql/my.cnf \
+  "${install_root}"/config/postgres/postgresql.conf \
+  "${install_root}"/config/redis/redis.conf "${install_root}"/config/kafka/kafka.env
 ln -sfn "${install_root}/dev-infra" /usr/local/bin/dev-infra
 
 echo "dev-infra 已安装到 ${install_root}"

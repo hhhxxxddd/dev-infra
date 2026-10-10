@@ -2,20 +2,34 @@
 set -Eeuo pipefail
 source "$(dirname "$0")/lib.sh"
 
+backup=true
+requested=()
+for argument in "$@"; do
+  case "${argument}" in
+    --no-backup) backup=false ;;
+    --*) echo "未知选项：${argument}" >&2; exit 2 ;;
+    *) requested+=("${argument}") ;;
+  esac
+done
+
 load_env
 require_docker
 targets=()
-resolve_services targets "$@"
+resolve_services targets "${requested[@]}"
 ensure_volumes "${targets[@]}"
 
 for service in "${targets[@]}"; do
-  if [[ "${service}" == mysql || "${service}" == postgres ]]; then
+  if [[ "${backup}" == true && ( "${service}" == mysql || "${service}" == postgres ) ]]; then
     "${ROOT_DIR}/bin/backup" "${service}"
   fi
 done
 
 dc_all config --quiet
-dc pull "${targets[@]}"
+images=("${targets[@]}")
+if service_requested s3 "${targets[@]}"; then
+  images+=(s3-client)
+fi
+dc pull "${images[@]}"
 dc up -d --wait --wait-timeout 240 "${targets[@]}"
 ensure_s3_bucket "${targets[@]}"
 print_service_table "${targets[@]}"
