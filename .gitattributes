@@ -1,7 +1,6 @@
 * text=auto
 *.sh text eol=lf
 dev-infra text eol=lf
-bin/* text eol=lf
 .env.example text eol=lf
 .gitignore text eol=lf
 .gitattributes text eol=lf
@@ -11,4 +10,9 @@ init/** text eol=lf
 *.ps1 text eol=crlf
 *.md text eol=lf
 *.yaml text eol=lf
+*.yml text eol=lf
 *.env text eol=lf
+*.py text eol=lf
+*.toml text eol=lf
+.python-version text eol=lf
+LICENSE text eol=lf

@@ -1,27 +1,12 @@
 [CmdletBinding()]
-param(
-    [string] $Distro = 'Ubuntu'
-)
-
+param([string] $Distro = 'Ubuntu')
 $ErrorActionPreference = 'Stop'
-$profilePath = $PROFILE.CurrentUserCurrentHost
-$startMarker = '# >>> dev-infra >>>'
-$endMarker = '# <<< dev-infra <<<'
-
-if (Test-Path -LiteralPath $profilePath) {
-    $content = Get-Content -LiteralPath $profilePath -Raw
-    $pattern = "(?ms)^$([regex]::Escape($startMarker)).*?^$([regex]::Escape($endMarker))\r?\n?"
-    $updated = [regex]::Replace($content, $pattern, '').TrimEnd()
-    [IO.File]::WriteAllText(
-        $profilePath,
-        $(if ($updated) { "$updated`r`n" } else { '' }),
-        [Text.UTF8Encoding]::new($false)
-    )
-}
-
-& wsl.exe -d $Distro -u root -- rm -f /usr/local/bin/dev-infra
-if ($LASTEXITCODE -ne 0) {
-    throw "移除 WSL 命令失败，退出码：$LASTEXITCODE"
-}
-
-Write-Host '已移除 Windows 和 WSL 命令入口。/opt/dev-infra 及其数据均已保留。'
+$binRoot = [IO.Path]::GetFullPath((Join-Path ([Environment]::GetFolderPath('UserProfile')) '.local/share/dev-infra/bin'))
+$entry = [IO.Path]::GetFullPath((Join-Path $binRoot 'dev-infra.cmd'))
+if ([IO.Path]::GetDirectoryName($entry) -ne $binRoot) { throw '入口路径无效。' }
+if (Test-Path -LiteralPath $entry) { Remove-Item -LiteralPath $entry -Force }
+$userPath = [Environment]::GetEnvironmentVariable('Path','User')
+[Environment]::SetEnvironmentVariable('Path', (@($userPath -split ';' | Where-Object { $_ -and $_ -ne $binRoot }) -join ';'), 'User')
+& wsl.exe -d $Distro -u root --exec bash /opt/dev-infra/scripts/uninstall.sh
+if ($LASTEXITCODE -ne 0) { throw 'WSL 卸载入口失败。' }
+Write-Host '已移除命令入口；配置、程序文件、备份和数据卷均已保留。'

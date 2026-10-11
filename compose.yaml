@@ -46,7 +46,7 @@ services:
       TZ: ${TZ}
     command: ["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf"]
     volumes:
-      - postgres_data:/var/lib/postgresql
+      - postgres_data:${POSTGRES_DATA_MOUNT:-/var/lib/postgresql}
       - ./config/postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
       - ./init/postgres:/docker-entrypoint-initdb.d:ro
     healthcheck:
