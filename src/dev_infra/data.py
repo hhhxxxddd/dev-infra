@@ -11,7 +11,8 @@ from uuid import uuid4
 
 from . import InfraError
 from .catalog import LEGACY_VOLUMES, SERVICES
-from .instance import read_env
+from .docker import managed_volume_service
+from .instance import Instance, read_env
 
 
 def backup(docker, targets: list[str]) -> list[dict]:
@@ -97,21 +98,26 @@ def volumes(docker, targets: list[str]) -> list[dict]:
     records = []
     for volume in metadata:
         name = volume["Name"]
-        labels = volume.get("Labels") or {}
-        owned = labels.get("io.dev-infra.managed") == "true" and labels.get(
-            "io.dev-infra.instance"
-        ) == str(docker.instance.root)
-        service = known.get(name) or (labels.get("io.dev-infra.service") if owned else None)
+        managed_service = managed_volume_service(volume, docker.instance.root)
+        service = active.get(name) or managed_service or known.get(name)
         if isinstance(service, dict):
-            service = service["service"]
+            service = service.get("service")
         if service not in targets:
             continue
+        owned = managed_service == service
         users = docker.volume_users(name)
         records.append(
             {
                 "service": service,
                 "volume": name,
-                "state": "active" if name in active else "referenced" if users else "obsolete",
+                "state": "active"
+                if name in active
+                else "referenced"
+                if users
+                else "obsolete"
+                if owned
+                else "external",
+                "ownership": "managed" if owned else "external",
                 "size": sizes.get(name, "-"),
                 "users": users,
                 "mountpoint": volume["Mountpoint"],
@@ -125,11 +131,23 @@ def prune(docker, records: list[dict]) -> list[str]:
     for record in records:
         if record["state"] != "obsolete":
             continue
-        # Recheck references and declarations immediately before deletion; no force.
+        # Recheck labels, live declarations and references immediately before deletion.
+        # A historical ledger entry is only a reference, never permission to delete.
         name = record["volume"]
-        if name in {
-            docker.instance.values[s.volume_key] for s in SERVICES.values()
-        } or docker.volume_users(name):
+        inspection = docker.run("volume", "inspect", name, check=False)
+        if inspection.returncode:
+            continue
+        metadata = json.loads(inspection.stdout)[0]
+        if (
+            metadata.get("Name") != name
+            or managed_volume_service(metadata, docker.instance.root) != record["service"]
+        ):
+            continue
+        current = Instance(docker.instance.root)
+        current.read_state("volumes.json")
+        if name in {current.values[s.volume_key] for s in SERVICES.values()} or docker.volume_users(
+            name
+        ):
             raise InfraError(f"volume_busy|{name}")
         docker.run("volume", "rm", name)
         removed.append(name)

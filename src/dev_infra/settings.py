@@ -130,7 +130,7 @@ def editor(settings: Settings) -> list[str]:
     return ["notepad.exe" if os.name == "nt" else "vi"]
 
 
-def edit(path: Path, settings: Settings, initial: str) -> None:
+def edit(path: Path, settings: Settings, initial: str, *, stdout=None) -> None:
     missing = []
     directory = path.parent
     while not directory.exists():
@@ -150,7 +150,7 @@ def edit(path: Path, settings: Settings, initial: str) -> None:
             for directory in missing:
                 os.chown(directory, identity.pw_uid, identity.pw_gid)
             argv = ["sudo", "-H", "-u", identity.pw_name, "--", *argv]
-    result = subprocess.run(argv, check=False)
+    result = subprocess.run(argv, check=False, stdout=stdout)
     if result.returncode:
         raise InfraError(f"editor_failed|{result.returncode}")
 

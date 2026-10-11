@@ -1,0 +1,71 @@
+name: release
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  checks:
+    uses: ./.github/workflows/checks.yml
+  publish:
+    needs: checks
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: '3.14.8'
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          pattern: dev-infra-*
+          path: verified
+      - name: Compare native builds and prepare release notes
+        env:
+          PYTHONPATH: src
+        shell: python
+        run: |
+          import os
+          from pathlib import Path
+          from dev_infra.release import release_notes
+          linux = Path("verified/dev-infra-Linux")
+          windows = Path("verified/dev-infra-Windows")
+          expected = {path.name for path in linux.iterdir() if path.is_file()}
+          if expected != {path.name for path in windows.iterdir() if path.is_file()}:
+              raise SystemExit("Native build assets differ")
+          for name in expected:
+              if (linux / name).read_bytes() != (windows / name).read_bytes():
+                  raise SystemExit(f"Native build bytes differ: {name}")
+          Path(os.environ["RUNNER_TEMP"], "release-notes.md").write_text(
+              release_notes(Path.cwd(), os.environ["GITHUB_REF_NAME"], os.environ["GITHUB_SHA"]),
+              encoding="utf-8",
+          )
+      - name: Publish immutable version assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          assets=verified/dev-infra-Linux
+          notes="$RUNNER_TEMP/release-notes.md"
+          tag="$GITHUB_REF_NAME"
+          if gh release view "$tag" --json isDraft > "$RUNNER_TEMP/release.json"; then
+            if python -c 'import json, sys; sys.exit(not json.load(open(sys.argv[1]))["isDraft"])' "$RUNNER_TEMP/release.json"; then
+              gh release upload "$tag" "$assets"/dev-infra-*.zip "$assets"/SHA256SUMS "$assets"/dev-infra.json --clobber
+              gh release edit "$tag" --draft=false --notes-file "$notes"
+            else
+              mkdir "$RUNNER_TEMP/published-assets"
+              gh release download "$tag" --dir "$RUNNER_TEMP/published-assets" --pattern 'dev-infra-*.zip' --pattern SHA256SUMS --pattern dev-infra.json
+              for asset in "$assets"/dev-infra-*.zip "$assets"/SHA256SUMS "$assets"/dev-infra.json; do
+                cmp "$asset" "$RUNNER_TEMP/published-assets/$(basename "$asset")"
+              done
+            fi
+          else
+            gh release create "$tag" "$assets"/dev-infra-*.zip "$assets"/SHA256SUMS "$assets"/dev-infra.json --verify-tag --notes-file "$notes"
+          fi

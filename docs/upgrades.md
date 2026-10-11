@@ -6,15 +6,17 @@
 
 ```text
 dev-infra check --updates
-dev-infra upgrade --dry-run
 dev-infra upgrade
 dev-infra upgrade redis
-dev-infra upgrade postgres --to 18.6 --dry-run
+dev-infra check --updates postgres --to 18.6
 dev-infra upgrade postgres --to 18.6
+dev-infra check --updates --no-backup
 dev-infra upgrade --no-backup
 ```
 
-预览与执行共用计划。查询失败时保留其他结果；执行要求全部查询成功，且没有迁移阻断。
+`check --updates` 只读显示版本、兼容范围、备份策略和执行步骤，不拉取镜像或修改实例。
+它与 `upgrade` 共用计划；查询失败时保留其他结果，执行要求全部查询成功且没有迁移阻断。
+`--to`、`--backup` 和 `--no-backup` 在 check 中必须与 `--updates` 同用；`--json` 只控制输出格式。
 自动升级范围如下，RC、preview、edge 不参与选择：
 
 | 服务 | 自动范围 | 跨范围方法 |
@@ -37,9 +39,10 @@ dev-infra upgrade --no-backup
 ## 失败恢复
 
 拉取全部目标镜像后才保存版本、重建容器。拉取失败时原有版本声明和容器不变。
-重建或健康验证失败时保留目标声明与完成步骤，记录在 `/opt/dev-infra/.state/last-upgrade.json`。
-先查看 `list` / `logs <服务>`，修复配置或启动问题，再执行同一 `upgrade` 命令。
-数据库不自动换回旧镜像；数据格式升级后，镜像回退不等于数据回退。
+`dev-infra check` / `check --json` 只读展示上次升级的失败阶段、错误、已完成步骤、逐服务状态和备份路径，并给出诊断、日志与重试命令。记录保存在 `/opt/dev-infra/.state/last-upgrade.json`；中途完成的备份也会立即记录。
+
+先按建议修复环境、配置或启动问题，再执行同一 `upgrade` 命令。重跑重新校验当前状态和计划，不从旧记录盲目续跑。成功后旧错误会清除。数据库不自动换回旧镜像；数据格式升级后，镜像回退不等于数据回退。
+
 
 ## PostgreSQL 跨主版本
 
@@ -143,7 +146,7 @@ unset POSTGRES_PASSWORD
 `POSTGRES_DATA_VOLUME` 为新卷，在 `config edit --versions` 中设置目标 `POSTGRES_VERSION`，
 然后 `dev-infra start postgres`。检查 `list`、连接和业务查询后，再恢复应用。
 切换前任一步失败都不删除旧卷；切换失败时保留两个卷，用旧版本与旧卷重新启动旧服务。
-清理旧卷前先运行 `data prune --dry-run`，确认后再执行 `data prune --yes`。
+清理旧卷前先运行 `data list` 查看数据卷和容器引用，确认后再执行 `data prune --yes`。
 
 ## 其他中间件跨范围
 
@@ -167,14 +170,13 @@ unset POSTGRES_PASSWORD
 ## 数据可丢弃时
 
 先用 `config edit --versions` 声明已确认的目标版本。需要换卷名时用 `config edit --instance`
-设置新卷。然后显式预览和重置：
+设置新卷。先查看数据卷，再显式重置或清理：
 
 ```text
-dev-infra data reset redis --dry-run
+dev-infra data list
 dev-infra data reset redis --yes
-dev-infra data prune --dry-run
 dev-infra data prune --yes
 ```
 
 重置只删除所选服务当前声明的卷，先校验配置和目标镜像，再停止、删除容器、重建卷并启动。
-旧卷清理依据本实例声明、归属记录和标签，排除当前卷及任何容器引用，不执行全局 volume prune。
+`data prune` 只删除具有匹配本实例与服务管理标签、且不属于当前声明也没有容器引用的闲置卷。旧卷名和历史归属记录仅用于识别，不构成删除授权；`data list` 显示归属，预先存在的外部卷会保留。删除前重新检查标签、当前声明和容器引用，不执行全局 volume prune。

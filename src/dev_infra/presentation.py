@@ -1,11 +1,15 @@
 """Central Chinese/English controller messages; JSON identifiers stay stable."""
 
 import json
+import re
+import sys
 import unicodedata
+
+JSON_SCHEMA_VERSION = 1
 
 TEXT = {
     "title": ("Windows / WSL 共用的本地中间件管理", "Shared local middleware for Windows / WSL"),
-    "list": ("查看服务概览（默认命令）", "List services (default command)"),
+    "list": ("查看中间件概览", "List middleware"),
     "show": ("查看详情和连接信息", "Show details and connections"),
     "start": ("启动服务", "Start services"),
     "stop": ("停止服务", "Stop services"),
@@ -13,12 +17,40 @@ TEXT = {
     "remove": ("删除容器，保留数据", "Remove containers, retain data"),
     "logs": ("查看日志", "Read logs"),
     "check": ("检查环境；--updates 检查更新", "Check environment; --updates checks releases"),
-    "upgrade": ("升级中间件；--dry-run 预览", "Upgrade middleware; --dry-run previews the plan"),
+    "upgrade": ("升级中间件", "Upgrade middleware"),
     "config": ("查看、编辑、检查配置", "Show, edit or validate configuration"),
     "data": ("查看数据卷、备份、重置或清理", "Inspect volumes, back up, reset or prune"),
     "self": ("查看或更新工具自身", "Inspect or update the controller"),
     "compose": ("直接调用本实例 Compose", "Call this instance's Compose directly"),
     "help": ("查看命令帮助", "Show command help"),
+    "common_commands": ("常用命令", "Common commands"),
+    "advanced_commands": ("进阶命令", "Advanced commands"),
+    "auxiliary_commands": ("辅助命令", "Utility commands"),
+    "command_arg": ("要执行的命令，参见下方列表", "Command to run; see the grouped list below"),
+    "help_topic_arg": (
+        "要查看的命令；省略时显示全部命令",
+        "Command to inspect; omit to show all commands",
+    ),
+    "data_summary": (
+        "数据管理：list 查看、backup 备份、reset 重置、prune 清理",
+        "Manage data: list volumes, backup databases, reset or prune",
+    ),
+    "config_summary": (
+        "配置管理：show 查看、config edit 编辑、check 校验",
+        "Configure: show settings, config edit to edit, check to validate",
+    ),
+    "self_summary": (
+        "查看工具状态；self upgrade 升级工具自身；update 重新部署",
+        "Inspect tool status; self upgrade upgrades the tool itself; update redeploys",
+    ),
+    "help_usage": (
+        "用法：dev-infra help <命令> 或 dev-infra <命令> --help",
+        "Usage: dev-infra help <command> or dev-infra <command> --help",
+    ),
+    "help_examples": (
+        "示例：dev-infra list；dev-infra start redis；dev-infra check --updates",
+        "Examples: dev-infra list; dev-infra start redis; dev-infra check --updates",
+    ),
     "command": ("命令", "command"),
     "action": ("操作", "action"),
     "path": ("路径", "Path"),
@@ -42,6 +74,7 @@ TEXT = {
     "docker": ("Docker 连接", "Docker connection"),
     "mysql_config_permissions": ("MySQL 配置权限", "MySQL configuration permissions"),
     "port_declarations": ("端口声明", "Port declarations"),
+    "volume_records": ("数据卷记录", "Volume records"),
     "steps": ("步骤", "Steps"),
     "validate": ("校验", "Validate"),
     "backup": ("备份", "Back up"),
@@ -70,16 +103,16 @@ TEXT = {
         "Services: mysql postgres redis kafka s3 mailpit; groups: core extra all",
     ),
     "json_arg": ("以 JSON 输出", "Output JSON"),
-    "dry_arg": (
-        "只预览，不修改配置、镜像或数据",
-        "Preview without changing configuration, images or data",
-    ),
     "to_arg": ("单个服务的目标稳定版本", "Target stable version for one service"),
     "no_backup_arg": ("本次升级跳过数据库备份", "Skip database backups for this upgrade"),
     "backup_arg": ("本次升级强制备份数据库", "Back up databases for this upgrade"),
     "updates_arg": (
-        "只读检查兼容分支的新版本",
-        "Read-only release checks within compatible branches",
+        "只读查看升级计划，默认检查兼容分支的新版本",
+        "Show the upgrade plan; check compatible releases by default",
+    ),
+    "updates_options_required": (
+        "--to、--backup 和 --no-backup 需要配合 --updates",
+        "--to, --backup and --no-backup require --updates",
     ),
     "secrets_arg": ("显示连接密码", "Show connection passwords"),
     "open_arg": ("打开此服务的网页", "Open this service's web page"),
@@ -88,7 +121,7 @@ TEXT = {
     "instance_arg": ("端口、账号等实例配置", "Instance settings: ports and accounts"),
     "versions_arg": ("本机镜像版本覆盖", "Local image version overrides"),
     "yes_arg": ("确认删除数据", "Confirm data deletion"),
-    "source_arg": ("已拉取新代码的可信仓库目录", "Verified checkout containing the new code"),
+    "source_arg": ("可信源码仓库目录", "Verified source checkout"),
     "preferences_arg": ("使用指定偏好文件", "Use a specific preferences file"),
     "version_arg": ("显示工具版本", "Show the controller version"),
     "config_actions": ("show 查看（默认）；edit 编辑；check 校验", "show (default), edit, check"),
@@ -97,8 +130,66 @@ TEXT = {
         "list (default), prune obsolete volumes, backup databases, reset one service",
     ),
     "self_actions": (
-        "status 查看（默认）；update 从已更新的源码部署",
-        "status (default), update from an updated checkout",
+        "status 查看（默认）；upgrade 拉取新版并部署；update 重新部署当前代码",
+        "status (default), upgrade fetches and deploys new code, update redeploys current code",
+    ),
+    "source_dirty": (
+        "源码仓库有本地修改；请提交或暂存后再执行 self upgrade",
+        "Source checkout has local changes; commit or stash them before self upgrade",
+    ),
+    "source_tracking_required": (
+        "当前分支必须跟踪已验证的 origin，才能执行 self upgrade",
+        "Source branch must track the verified origin before self upgrade",
+    ),
+    "source_update_failed": (
+        "源码更新失败；请检查 Git 来源、分支和网络后重试",
+        "Source update failed; check Git origin, branch and network, then retry",
+    ),
+    "command_timeout": (
+        "命令超时；请检查环境后重试",
+        "Command timed out; check the environment and retry",
+    ),
+    "command_failed": (
+        "命令执行失败；请检查环境后重试",
+        "Command failed; check the environment and retry",
+    ),
+    "ownership": ("归属", "Ownership"),
+    "managed": ("本实例管理", "Managed by this instance"),
+    "channel": ("更新渠道", "Update channel"),
+    "upgrade_recovery": ("上次升级", "Last upgrade"),
+    "recovery": ("升级恢复诊断", "Upgrade recovery diagnostics"),
+    "stage": ("失败阶段", "Failure stage"),
+    "journal": ("诊断记录", "Diagnostic journal"),
+    "completed_steps": ("已完成步骤", "Completed steps"),
+    "warning": ("需要检查", "Needs review"),
+    "pending": ("待执行", "Pending"),
+    "pulling": ("正在拉取", "Pulling"),
+    "pulled": ("已拉取", "Pulled"),
+    "applying": ("正在切换", "Applying"),
+    "operation_failed": ("操作失败", "Operation failed"),
+    "operation_timeout": ("操作超时", "Operation timed out"),
+    "operation_interrupted": ("操作已中断", "Operation interrupted"),
+    "unknown": ("未知", "Unknown"),
+    "activate": ("启用", "Activate"),
+    "verify_current": ("验证当前状态", "Verify current state"),
+    "inspect_services": ("查看当前服务", "Inspect current services"),
+    "inspect_logs": ("查看服务日志", "Inspect service logs"),
+    "retry_upgrade": (
+        "修复原因后重新校验并升级",
+        "Fix the cause, then revalidate and retry the upgrade",
+    ),
+    "avoid_database_downgrade": (
+        "数据库不会自动回滚；不要直接换回旧镜像",
+        "Databases do not roll back automatically; do not directly switch to an older image",
+    ),
+    "inspect_upgrade_journal": (
+        "检查损坏或不完整的诊断记录",
+        "Inspect the damaged or incomplete upgrade journal",
+    ),
+    "external": ("外部卷，保留", "External volume, retained"),
+    "volume_unowned": (
+        "数据卷归属未经验证，拒绝清理",
+        "Volume ownership is unverified; pruning refused",
     ),
     "backup_unavailable": (
         "数据库未运行，无法完成备份；请先启动，或显式使用 --no-backup",
@@ -108,6 +199,15 @@ TEXT = {
     "options": ("选项", "options"),
     "positionals": ("位置参数", "positional arguments"),
     "arg_error": ("参数错误", "Argument error"),
+    "invalid_arguments": ("参数无效", "Invalid arguments"),
+    "partial_result": ("操作或查询未全部完成", "The operation or query did not fully complete"),
+    "check_failed": ("环境检查发现错误", "Environment checks reported errors"),
+    "transport_failed": ("WSL 未返回有效的结果", "WSL did not return a valid result"),
+    "invalid_state": ("本地状态记录损坏，请检查文件", "Local state is damaged; inspect the file"),
+    "unsupported_state_version": (
+        "本地状态格式版本不受支持，已保留原文件",
+        "Local state format is unsupported; the original file is retained",
+    ),
     "unknown_service": ("未知服务或分组", "Unknown service or group"),
     "invalid_config": ("偏好配置无效", "Invalid preferences"),
     "invalid_env": ("实例配置无效", "Invalid instance configuration"),
@@ -131,8 +231,8 @@ TEXT = {
     "one_target": ("此操作需要指定一个服务", "This operation requires exactly one service"),
     "db_only": ("备份支持 mysql 和 postgres", "Backups support mysql and postgres"),
     "confirm_required": (
-        "请添加 --yes 确认删除数据；可先用 --dry-run 预览",
-        "Add --yes to delete data; preview with --dry-run first",
+        "请添加 --yes 确认删除数据；可先用 data list 查看数据卷",
+        "Add --yes to delete data; inspect volumes with data list first",
     ),
     "volume_busy": ("数据卷仍被容器引用", "Volume is still referenced by a container"),
     "migration_required": (
@@ -149,6 +249,11 @@ TEXT = {
         "Upgrade incomplete; target declarations and completed steps are retained; fix the cause and rerun upgrade",
     ),
     "unverified_source": ("仓库来源未经验证", "Unverified checkout origin"),
+    "release_unavailable": ("无法查询工具发行版本", "Tool releases are unavailable"),
+    "release_download_failed": ("发行包下载失败", "Release archive download failed"),
+    "git": ("Git 源码", "Git checkout"),
+    "release": ("发行包", "Release archive"),
+    "scoop": ("Scoop", "Scoop"),
     "source_missing": (
         "找不到源码目录，请用 --source 指定已拉取新代码的仓库",
         "Source unavailable; use --source to select an updated checkout",
@@ -191,8 +296,9 @@ TEXT = {
 
 
 class Presentation:
-    def __init__(self, language: str):
+    def __init__(self, language: str, *, json_stream=None):
         self.language = language
+        self.json_stream = json_stream
 
     def t(self, key: str) -> str:
         return TEXT[key][self.language == "en"] if key in TEXT else key
@@ -201,9 +307,54 @@ class Presentation:
         key, _, detail = str(error).partition("|")
         return self.t(key) + (f"：{detail}" if detail else "")
 
+    def error_record(self, code: str, detail: str = "", *, details=None) -> dict:
+        if not re.fullmatch(r"[a-z_]+", code):
+            code = "operation_failed"
+        return {
+            "code": code,
+            "message": self.t(code),
+            "details": details if details is not None else {"detail": detail} if detail else {},
+        }
+
+    def failure(self, code: str, detail: str, *, as_json: bool) -> None:
+        if as_json:
+            self.output(
+                {"complete": False, "state": "error", "error": self.error_record(code, detail)},
+                True,
+            )
+        else:
+            print(self.error(ValueError(code + ("|" + detail if detail else ""))), file=sys.stderr)
+
     def output(self, payload: dict, as_json: bool) -> None:
         if as_json:
-            print(json.dumps(payload, ensure_ascii=False, indent=2))
+            result = {**payload, "schema_version": JSON_SCHEMA_VERSION}
+            if (
+                result.get("complete") is False
+                or result.get("blocked")
+                or result.get("state") == "error"
+            ) and not result.get("error"):
+                reason = next(
+                    (
+                        record["reason"]
+                        for record in result.get("images", [])
+                        if record.get("reason")
+                    ),
+                    None,
+                )
+                code = (
+                    reason or "query_failed"
+                    if "images" in result
+                    else "check_failed"
+                    if "checks" in result
+                    else "docker_unavailable"
+                    if any(
+                        record.get("state") == "unavailable"
+                        for record in result.get("services", [])
+                    )
+                    else "partial_result"
+                )
+                result["error"] = self.error_record(code)
+            print(json.dumps(result, ensure_ascii=False, indent=2), file=self.json_stream)
             return
         if "services" in payload:
             self.table(payload["services"], ("service", "state", "image", "endpoint"))
@@ -226,17 +377,16 @@ class Presentation:
             if payload.get("state"):
                 print(f"{self.t('state')}: {self.t(payload['state'])}")
             self.table(payload["images"], ("service", "state", "image", "target"))
-            if payload.get("mode") != "check":
-                print(
-                    f"{self.t('steps')}: " + " → ".join(self.t(step) for step in payload["steps"])
-                )
+            print(f"{self.t('steps')}: " + " → ".join(self.t(step) for step in payload["steps"]))
             for record in payload["images"]:
                 if record.get("reason"):
                     print(self.t(record["reason"]))
                 if record.get("error"):
                     print(self.error(ValueError(record["error"])))
         elif "volumes" in payload:
-            self.table(payload["volumes"], ("service", "state", "volume", "size", "users"))
+            self.table(
+                payload["volumes"], ("service", "state", "ownership", "volume", "size", "users")
+            )
             if payload.get("removed"):
                 print(self.t("removed") + ": " + ", ".join(payload["removed"]))
         elif "checks" in payload:
@@ -244,6 +394,32 @@ class Presentation:
             for record in payload["checks"]:
                 if record.get("detail"):
                     print(f"{self.t(record['check'])}: {self.error(ValueError(record['detail']))}")
+            recovery = payload.get("recovery", {})
+            if recovery.get("needs_attention"):
+                print(f"\n{self.t('recovery')}")
+                print(f"{self.t('stage')}: {self.t(recovery.get('stage') or 'unknown')}")
+                print(f"{self.t('journal')}: {recovery['journal']}")
+                error = recovery.get("error")
+                if isinstance(error, dict):
+                    code = error.get("code", "operation_failed")
+                    detail = error.get("message", "")
+                    print(
+                        self.error(
+                            ValueError(code + ("|" + detail if detail and detail != code else ""))
+                        )
+                    )
+                steps = recovery.get("completed_steps") or []
+                print(
+                    f"{self.t('completed_steps')}: "
+                    + (" → ".join(self.t(step) for step in steps) or "-")
+                )
+                if recovery.get("services"):
+                    self.table(recovery["services"], ("service", "state", "target"))
+                if recovery.get("backups"):
+                    self.table(recovery["backups"], ("service", "state", "path"))
+                for recommendation in recovery.get("recommendations", []):
+                    command = " ".join(recommendation.get("argv", []))
+                    print(self.t(recommendation["action"]) + (": " + command if command else ""))
         elif "backups" in payload:
             self.table(payload["backups"], ("service", "state", "path"))
         else:
@@ -254,7 +430,7 @@ class Presentation:
                     value = self.t("yes" if value else "no")
                 elif isinstance(value, list):
                     value = ", ".join(str(v) for v in value) or "-"
-                elif key in ("state", "action"):
+                elif key in ("state", "action", "channel"):
                     value = self.t(str(value))
                 print(f"{self.t(key)}: {value}")
 
@@ -269,7 +445,9 @@ class Presentation:
                 value = record.get(key, "-")
                 if isinstance(value, list):
                     value = ", ".join(value) or "-"
-                row.append(self.t(str(value)) if key in ("state", "check") else str(value))
+                row.append(
+                    self.t(str(value)) if key in ("state", "check", "ownership") else str(value)
+                )
             rows.append(row)
         widths = [max(width(row[i]) for row in rows) for i in range(len(keys))]
         for row in rows:

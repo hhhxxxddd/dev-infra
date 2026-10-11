@@ -67,7 +67,7 @@ volumes:
             )
             operations.lifecycle(docker, preferences, "remove", ["redis"])
             assert docker.run("volume", "inspect", volume).returncode == 0
-            operations.reset(docker, preferences, ["redis"], dry_run=False, yes=True)
+            operations.reset(docker, preferences, ["redis"], yes=True)
             assert (
                 docker.compose(
                     "exec", "-T", "redis", "redis-cli", "GET", "dev-infra-smoke"

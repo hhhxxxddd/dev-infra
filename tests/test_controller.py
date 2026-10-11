@@ -49,22 +49,45 @@ class ControllerTests(unittest.TestCase):
         return code, output.getvalue(), errors.getvalue()
 
     def test_queries_do_not_initialize_configuration_or_state(self):
+        original_files = {
+            path.relative_to(self.root): path.read_bytes()
+            for path in self.root.rglob("*")
+            if path.is_file()
+        }
         for args in (
             ("list",),
             ("show", "mysql"),
             ("check",),
             ("check", "--updates"),
-            ("upgrade", "mysql", "--dry-run"),
+            ("check", "mysql", "--updates", "--to", "8.4.12", "--backup"),
+            ("check", "postgres", "--updates", "--to", "18.7", "--no-backup"),
             ("data", "list"),
-            ("data", "prune", "--dry-run"),
+            ("data", "list", "redis"),
             ("config", "check"),
             ("config", "show", "--versions"),
         ):
-            with self.subTest(args=args):
+            with (
+                self.subTest(args=args),
+                patch.object(data, "backup", side_effect=AssertionError("query must not back up")),
+                patch.object(
+                    operations, "upgrade", side_effect=AssertionError("query must not upgrade")
+                ),
+                patch.object(
+                    Instance, "initialize", side_effect=AssertionError("query must not initialize")
+                ),
+            ):
                 self.assertEqual(self.invoke(*args)[0], 0)
                 self.assertFalse(self.instance.env_path.exists())
                 self.assertFalse(self.instance.state.exists())
                 self.assertFalse(self.preferences.exists())
+                self.assertEqual(
+                    {
+                        path.relative_to(self.root): path.read_bytes()
+                        for path in self.root.rglob("*")
+                        if path.is_file()
+                    },
+                    original_files,
+                )
         self.assertFalse(any(c[0] in ("pull", "up", "rm") for c in self.docker.calls))
 
     def test_invalid_arguments_have_no_docker_or_config_side_effects(self):
@@ -73,12 +96,30 @@ class ControllerTests(unittest.TestCase):
             ("data", "reset", "redis", "--yes", "unexpected"),
             ("data", "backup", "redis"),
             ("data", "backup", "mysql", "--dry-run"),
+            ("upgrade", "mysql", "--dry-run"),
+            ("data", "reset", "redis", "--dry-run"),
+            ("data", "prune", "--dry-run"),
             ("upgrade", "all", "--to", "18.6"),
+            ("check", "--updates", "all", "--to", "18.6"),
+            ("check", "--updates", "postgres", "--to", "invalid"),
+            ("check", "--updates", "postgres", "--to", ""),
+            ("check", "--updates", "postgres", "--to", "18.6.1"),
+            ("check", "--updates", "redis", "--to", "8.10"),
+            ("upgrade", "postgres", "--to", "18.6.1"),
+            ("upgrade", "redis", "--to", "8.10"),
+            ("check", "postgres", "--to", "18.6"),
+            ("check", "--backup"),
+            ("check", "--no-backup"),
+            ("check", "--updates", "--backup", "--no-backup"),
             ("upgrade", "redis", "--no-backups"),
             ("show", "mysql", "--open"),
             ("self", "status", "--source", "."),
         ):
-            with self.subTest(args=args):
+            with (
+                self.subTest(args=args),
+                patch.object(cli, "forward", side_effect=AssertionError("invalid transport")),
+                patch.object(cli, "Docker", side_effect=AssertionError("invalid Docker access")),
+            ):
                 self.docker.calls.clear()
                 self.assertNotEqual(self.invoke(*args)[0], 0)
                 self.assertFalse(self.docker.calls)
@@ -91,6 +132,55 @@ class ControllerTests(unittest.TestCase):
             self.assertEqual(code, 0)
             self.assertIn(word, output)
             self.assertIn("--to", output)
+            self.assertNotIn("--dry-run", output)
+
+    def test_update_check_matches_exact_upgrade_plan_and_backup_preferences(self):
+        for preference, options, backup in (
+            (True, (), True),
+            (False, (), False),
+            (False, ("--backup",), True),
+            (True, ("--no-backup",), False),
+        ):
+            with self.subTest(preference=preference, options=options):
+                self.preferences.write_text(
+                    f"[operation]\nbackup = {str(preference).lower()}\n", encoding="utf-8"
+                )
+                args = ("postgres", "--to", "18.7", *options, "--json")
+                code, output, errors = self.invoke("check", "--updates", *args)
+                self.assertEqual(code, 0, errors)
+                checked = json.loads(output)
+                self.assertEqual(checked.pop("schema_version"), 1)
+                self.assertEqual(checked.pop("mode"), "check")
+                with patch.object(operations, "upgrade", return_value={"complete": True}) as run:
+                    self.assertEqual(self.invoke("upgrade", *args)[0], 0)
+                self.assertEqual(checked, run.call_args.args[2])
+                self.assertEqual(checked["backup"], backup)
+                self.assertIn("backup" if backup else "skip_backup", checked["steps"])
+                self.assertEqual(checked["images"][0]["version"], "18.7@" + DIGEST)
+                self.assertFalse(self.instance.env_path.exists())
+                self.assertFalse(self.instance.state.exists())
+                self.assertFalse((self.root / "backup").exists())
+
+    def test_update_check_human_output_shows_backup_steps_without_executing(self):
+        for language, title, enabled, skipped in (
+            ("zh", "步骤", "备份", "跳过备份"),
+            ("en", "Steps", "Back up", "Skip backups"),
+        ):
+            for option, expected in (("--backup", enabled), ("--no-backup", skipped)):
+                with self.subTest(language=language, option=option):
+                    self.preferences.write_text(f'language = "{language}"\n', encoding="utf-8")
+                    with patch.object(
+                        data, "backup", side_effect=AssertionError("query must not back up")
+                    ):
+                        code, output, errors = self.invoke("check", "mysql", "--updates", option)
+                    self.assertEqual(code, 0, errors)
+                    steps = next(
+                        line for line in output.splitlines() if line.startswith(title + ":")
+                    )
+                    self.assertIn(" → " + expected + " → ", steps)
+                    self.assertFalse(self.instance.env_path.exists())
+                    self.assertFalse(self.instance.state.exists())
+                    self.assertFalse((self.root / "backup").exists())
 
     def test_cli_rejects_other_python_minor_versions_before_docker_access(self):
         for version in ((3, 11), (3, 12), (3, 13), (3, 15)):
@@ -110,8 +200,24 @@ class ControllerTests(unittest.TestCase):
             values.append(json.loads(output))
         self.assertEqual(values[0], values[1])
 
-    def test_default_is_list_and_connection_passwords_are_masked(self):
-        self.assertEqual(self.invoke()[0], 0)
+    def test_empty_command_shows_help_without_transport_or_docker(self):
+        for language in ("zh", "en"):
+            self.preferences.write_text(f'language = "{language}"\n', encoding="utf-8")
+            with (
+                patch.object(cli, "forward", side_effect=AssertionError("help must not forward")),
+                patch.object(
+                    cli, "Docker", side_effect=AssertionError("help must not inspect Docker")
+                ),
+            ):
+                empty = self.invoke()
+                explicit = self.invoke("help")
+            self.assertEqual(empty, explicit)
+            self.assertEqual(empty[0], 0)
+            self.assertIn("list", empty[1])
+            self.assertFalse(self.instance.env_path.exists())
+            self.assertFalse(self.instance.state.exists())
+
+    def test_connection_passwords_are_masked(self):
         _, output, _ = self.invoke("show", "mysql", "--json")
         self.assertNotIn("dev123456", output)
         self.assertNotIn("root123456", output)
@@ -150,14 +256,14 @@ class ControllerTests(unittest.TestCase):
 
     def test_pinned_digest_runtime_image_keeps_compatible_scope(self):
         self.docker.entries["postgres"]["Config"]["Image"] = "postgres:18.5@" + DIGEST
-        code, output, errors = self.invoke("upgrade", "postgres", "--dry-run", "--json")
+        code, output, errors = self.invoke("check", "--updates", "postgres", "--json")
         self.assertEqual(code, 0, errors)
         self.assertFalse(json.loads(output)["blocked"])
 
     def test_target_branch_does_not_require_a_registry_alias_tag(self):
         with patch.object(FakeRegistry, "exact", side_effect=AssertionError("branch is not a tag")):
             code, output, errors = self.invoke(
-                "upgrade", "kafka", "--to", "4.3", "--dry-run", "--json"
+                "check", "--updates", "kafka", "--to", "4.3", "--json"
             )
         self.assertEqual(code, 0, errors)
         self.assertEqual(json.loads(output)["images"][0]["version"], "4.3.1@" + DIGEST)
@@ -182,12 +288,12 @@ class ControllerTests(unittest.TestCase):
         self.assertFalse(any(c[0] == "up" for c in self.docker.calls))
         self.assertFalse(self.instance.env_path.exists())
 
-    def test_upgrade_preview_blocks_incompatible_stopped_database_volume(self):
+    def test_update_check_and_upgrade_block_incompatible_stopped_database_volume(self):
         self.docker.entries.pop("postgres")
         volume = self.instance.values["POSTGRES_DATA_VOLUME"]
         self.docker.volume_metadata[volume]["Labels"]["io.dev-infra.scope"] = "17"
-        for extra in (("--dry-run",), ()):
-            code, output, _ = self.invoke("upgrade", "postgres", "--no-backup", "--json", *extra)
+        for command in (("check", "--updates"), ("upgrade",)):
+            code, output, _ = self.invoke(*command, "postgres", "--no-backup", "--json")
             self.assertEqual(code, 1)
             self.assertTrue(json.loads(output)["blocked"])
             self.assertFalse(self.instance.env_path.exists())
@@ -242,16 +348,45 @@ class ControllerTests(unittest.TestCase):
                 "Labels": {},
                 "Mountpoint": "/isolated/" + name,
             }
+        self.docker.volume_metadata[old]["Labels"] = {
+            "io.dev-infra.managed": "true",
+            "io.dev-infra.instance": str(self.root),
+            "io.dev-infra.service": "postgres",
+        }
         code, output, errors = self.invoke("data", "prune", "--yes", "--json")
         self.assertEqual(code, 0, errors)
         self.assertEqual(json.loads(output)["removed"], [old])
         self.assertIn(foreign, self.docker.volume_metadata)
         self.assertEqual(len(self.docker.volume_metadata), 7)
 
-    def test_reset_requires_confirmation_before_stop_or_delete(self):
-        code, _, _ = self.invoke("data", "reset", "redis")
-        self.assertEqual(code, 1)
-        self.assertFalse(any(c[0] in ("stop", "rm") for c in self.docker.calls))
+    def test_data_deletion_requires_confirmation_before_transport_or_docker_access(self):
+        for action in ("reset", "prune"):
+            with (
+                self.subTest(action=action),
+                patch.object(cli, "forward", side_effect=AssertionError("unconfirmed transport")),
+                patch.object(
+                    cli, "Docker", side_effect=AssertionError("unconfirmed Docker access")
+                ),
+            ):
+                code, _, errors = self.invoke("data", action, "redis")
+                self.assertEqual(code, 1)
+                self.assertIn("--yes", errors)
+                self.assertIn("data list", errors)
+                self.assertFalse(self.docker.calls)
+                self.assertFalse(self.instance.env_path.exists())
+                self.assertFalse(self.instance.state.exists())
+
+    def test_reset_operation_rejects_unconfirmed_deletion_before_inspection(self):
+        with (
+            patch.object(
+                self.docker,
+                "service_containers",
+                side_effect=AssertionError("unconfirmed inspection"),
+            ),
+            self.assertRaisesRegex(InfraError, "confirm_required"),
+        ):
+            operations.reset(self.docker, settings.Settings(self.preferences), ["redis"], yes=False)
+        self.assertFalse(self.docker.calls)
 
     def test_config_edit_can_repair_invalid_toml(self):
         self.preferences.write_text("not toml", encoding="utf-8")

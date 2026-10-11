@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "personal-dev-infra"
-version = "0.2.0"
+version = "0.3.0"
 description = "Shared local middleware management through Docker Compose."
 license = "MIT"
 license-files = ["LICENSE"]

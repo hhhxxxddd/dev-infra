@@ -6,16 +6,19 @@
 
 ```text
 dev-infra check --updates
-dev-infra upgrade --dry-run
 dev-infra upgrade
 dev-infra upgrade redis
-dev-infra upgrade postgres --to 18.6 --dry-run
+dev-infra check --updates postgres --to 18.6
 dev-infra upgrade postgres --to 18.6
+dev-infra check --updates --no-backup
 dev-infra upgrade --no-backup
 ```
 
-Preview and execution share a plan. Failed queries preserve other results; execution requires
-every query to succeed and no migration blocks. RC, preview and edge releases are excluded.
+`check --updates` shows versions, compatible scopes, backup policy and execution steps read-only,
+without pulling images or modifying the instance. It shares the plan with `upgrade`. Failed
+queries preserve other results; execution requires every query to succeed and no migration blocks.
+On check, `--to`, `--backup` and `--no-backup` require `--updates`; `--json` controls output format only.
+RC, preview and edge releases are excluded.
 
 | Service | Automatic scope | Changes outside the scope |
 | --- | --- | --- |
@@ -38,11 +41,11 @@ default. `data backup` always requests a backup explicitly.
 
 ## Recovery
 
-All target images are pulled before saving versions or recreating containers. Pull failures leave
-original declarations and containers unchanged. Recreate or health failures retain target versions
-and completed steps in `/opt/dev-infra/.state/last-upgrade.json`. Inspect `list` and `logs <service>`,
-fix the configuration or startup issue, then rerun the same `upgrade` command. Database images are
-not automatically rolled back; an older image does not reverse an upgraded data format.
+All target images are pulled before version declarations or containers change. Pull failures retain existing declarations and containers.
+`dev-infra check` / `check --json` read the previous upgrade stage, error, completed steps, per-service state and backup paths, with diagnostic, log and retry commands. The journal lives at `/opt/dev-infra/.state/last-upgrade.json`; each completed backup is recorded immediately.
+
+Fix the environment, configuration or startup failure, then rerun the same `upgrade` command. A retry validates current state and a new plan instead of blindly resuming the old journal. Success clears the old failure. Databases never automatically switch back to old images; reverting an image does not revert an upgraded data format.
+
 
 ## PostgreSQL major versions
 
@@ -151,8 +154,8 @@ Run `dev-infra remove postgres`. Set `POSTGRES_DATA_VOLUME` to the new volume th
 `config edit --instance`, and the target `POSTGRES_VERSION` through `config edit --versions`.
 Run `dev-infra start postgres`, validate status, connections and business queries, then resume
 applications. Failures before cutover never delete the old volume. If cutover fails, retain both
-volumes and start the old service using its original version and volume. Preview obsolete volume
-cleanup with `data prune --dry-run`, then explicitly use `data prune --yes`.
+volumes and start the old service using its original version and volume. Inspect obsolete volumes
+and container references with `data list`, then explicitly use `data prune --yes`.
 
 ## Other middleware scope changes
 
@@ -181,16 +184,14 @@ These paths need target-specific validation; there is no generic force-major-upg
 ## Disposable data
 
 Declare the confirmed target using `config edit --versions`. If using a new volume name, set it
-through `config edit --instance`. Preview and explicitly reset:
+through `config edit --instance`. Inspect the volumes, then explicitly reset or clean up:
 
 ```text
-dev-infra data reset redis --dry-run
+dev-infra data list
 dev-infra data reset redis --yes
-dev-infra data prune --dry-run
 dev-infra data prune --yes
 ```
 
 Reset deletes only the selected service's declared volume. It validates configuration and the
-target image before stopping/removing containers and recreating the volume. Cleanup uses instance
-declarations, ownership records and labels, excluding current or referenced volumes; it never runs
-a global volume prune.
+target image before stopping/removing containers and recreating the volume.
+`data prune` deletes only idle volumes carrying matching instance and service management labels, excluding currently declared volumes and any container references. Old volume names and historical ownership records help identify volumes; they do not authorize deletion. `data list` shows ownership, and pre-existing external volumes are retained. Labels, current declarations and container references are checked again before deletion; no global volume prune runs.

@@ -23,8 +23,10 @@ tests/integration/   Real lifecycle checks in an independent Docker project
 
 Python 3.14 standard library only; other minor versions are unsupported.
 Compose is the sole container execution backend.
-Windows owns local preferences and forwards operations; runtime, instance files and operation
-locks remain in the shared WSL backend.
+Windows owns local preferences and forwards operations; instance files and operation locks remain
+in the shared WSL backend. The controller references external native Python and may share the base
+interpreter with dev-tools; code, dependencies and configuration remain separate. Installers only
+validate and record the real `.python` path; they do not install, upgrade or clean external runtimes.
 
 ## Checks
 
@@ -33,13 +35,13 @@ Windows:
 ```powershell
 $env:PYTHONPATH = "$PWD\src"
 python -m unittest discover -v tests
-uvx ruff check src scripts/dev-infra.py tests
-uvx ruff format --check src scripts/dev-infra.py tests
+uvx ruff check src scripts tests
+uvx ruff format --check src scripts tests
 ```
 
 WSL:
 
-If using the private deployed interpreter, add its directory to this shell's PATH first:
+If the bound external interpreter is absent from PATH, add its directory to this shell's PATH first:
 
 ```bash
 export PATH="$(dirname "$(cat /opt/dev-infra/.python)"):$PATH"
@@ -48,8 +50,8 @@ export PATH="$(dirname "$(cat /opt/dev-infra/.python)"):$PATH"
 ```bash
 export PYTHONPATH="$PWD/src"
 python3.14 -m unittest discover -v tests
-uvx ruff check src scripts/dev-infra.py tests
-uvx ruff format --check src scripts/dev-infra.py tests
+uvx ruff check src scripts tests
+uvx ruff format --check src scripts tests
 bash -n dev-infra
 for file in scripts/*.sh; do bash -n "$file"; done
 shellcheck dev-infra scripts/*.sh
@@ -77,3 +79,11 @@ service health.
 Keep both READMEs and configuration/upgrade guides aligned in commands, defaults and examples.
 Validate local Markdown links, TOML examples and Bash migration example syntax. Installation
 delivers complete documentation; default templates retain Chinese guidance.
+
+## CI and release verification
+
+Pushes and Pull Requests run the native Windows/Ubuntu Python 3.14.8 unit and CLI-contract suites, Ruff, PowerShell parsing, Bash/ShellCheck, documentation/TOML checks and extracted-package smoke checks. Verification tools are pinned in `requirements-dev.txt`. Run `python -m dev_infra.validation` locally.
+
+Official `vX.Y.Z` builds require clean committed sources matching the version and tag. The release workflow reuses daily CI and requires Windows/Linux artifact bytes to agree before publishing immutable assets. Each official Release generates a manifest asset for hxd-box to synchronize and maintain its bucket; this repository's workflow does not automatically push bucket updates.
+
+Before tagging, run `tests/integration/lifecycle.py` and `tests/integration/correctness.py` against isolated resources and installed images. Validate real Windows→WSL JSON/exit-code forwarding, deployment preservation and native entrypoints. Ubuntu CI is not a substitute for actual WSL transport verification. See the [CLI contract](cli-contract.en.md) and [release guide](releases.en.md).

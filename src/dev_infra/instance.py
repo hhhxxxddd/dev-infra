@@ -11,6 +11,59 @@ from . import InfraError
 from .catalog import SERVICES, VERSION_KEYS
 
 VERSION = re.compile(r"^v?\d+(?:\.\d+){0,2}(?:@sha256:[0-9a-f]{64})?$")
+STATE_FORMAT_VERSION = 1
+VERSIONED_STATES = {"volumes.json", "last-upgrade.json"}
+
+
+def validate_state(name: str, value) -> None:
+    """Validate persisted records without treating references as ownership proof."""
+    if not isinstance(value, dict):
+        raise InfraError(f"invalid_state|{name}")
+    if name == "volumes.json":
+        for volume, record in value.items():
+            if not isinstance(volume, str) or not re.fullmatch(
+                r"[a-zA-Z0-9][a-zA-Z0-9_.-]*", volume
+            ):
+                raise InfraError(f"invalid_state|{name}")
+            if isinstance(record, str) and record in SERVICES:
+                continue
+            if (
+                not isinstance(record, dict)
+                or not isinstance(record.get("service"), str)
+                or record.get("service") not in SERVICES
+                or record.get("scope") is not None
+                and not isinstance(record["scope"], str)
+                or record.get("ownership") not in (None, "managed", "external")
+            ):
+                raise InfraError(f"invalid_state|{name}")
+    elif name == "last-upgrade.json" and value:
+        if value.get("state") not in ("running", "error", "complete", "unchanged"):
+            raise InfraError(f"invalid_state|{name}")
+        for key in ("stage", "active_service", "started_at", "updated_at", "finished_at"):
+            if value.get(key) is not None and not isinstance(value[key], str):
+                raise InfraError(f"invalid_state|{name}")
+        for key in ("services_selected", "completed_steps"):
+            records = value.get(key, [])
+            if not isinstance(records, list) or any(not isinstance(item, str) for item in records):
+                raise InfraError(f"invalid_state|{name}")
+        for key, fields in (
+            ("images", ("version",)),
+            ("backups", ("service", "state", "path")),
+            ("service_results", ("service", "state", "target")),
+        ):
+            records = value.get(key, [])
+            if not isinstance(records, list) or any(
+                not isinstance(record, dict)
+                or any(not isinstance(record.get(field, ""), str) for field in fields)
+                for record in records
+            ):
+                raise InfraError(f"invalid_state|{name}")
+        error = value.get("error")
+        if error is not None and (
+            not isinstance(error, dict)
+            or any(not isinstance(error.get(key, ""), str) for key in ("type", "code", "message"))
+        ):
+            raise InfraError(f"invalid_state|{name}")
 
 
 def read_env(path: Path) -> dict[str, str]:
@@ -117,11 +170,35 @@ class Instance:
         self.values.update(changes)
 
     def save_state(self, name: str, value: dict) -> None:
+        validate_state(name, value)
+        if name in VERSIONED_STATES:
+            # Do not replace an unknown or damaged record with an empty new ledger.
+            self.read_state(name)
+            value = {
+                "format": "dev-infra.state",
+                "format_version": STATE_FORMAT_VERSION,
+                "payload": value,
+            }
         atomic_write(self.state / name, json.dumps(value, ensure_ascii=False, indent=2) + "\n")
 
     def read_state(self, name: str) -> dict:
         path = self.state / name
-        return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+        if not path.exists():
+            return {}
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except ValueError:
+            raise InfraError(f"invalid_state|{name}") from None
+        if isinstance(value, dict) and value.get("format") == "dev-infra.state":
+            version = value.get("format_version")
+            if type(version) is not int:
+                raise InfraError(f"invalid_state|{name}")
+            if version != STATE_FORMAT_VERSION:
+                raise InfraError(f"unsupported_state_version|{name}")
+            value = value.get("payload")
+        # Unversioned local records remain readable; queries never migrate them.
+        validate_state(name, value)
+        return value
 
     @contextmanager
     def lock(self):
