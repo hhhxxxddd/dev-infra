@@ -350,7 +350,7 @@ class ControllerTests(unittest.TestCase):
             }
         self.docker.volume_metadata[old]["Labels"] = {
             "io.dev-infra.managed": "true",
-            "io.dev-infra.instance": str(self.root),
+            "io.dev-infra.instance": str(self.instance.root),
             "io.dev-infra.service": "postgres",
         }
         code, output, errors = self.invoke("data", "prune", "--yes", "--json")

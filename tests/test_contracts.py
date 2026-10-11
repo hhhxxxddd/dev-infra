@@ -305,7 +305,7 @@ class StateContractTests(unittest.TestCase):
             "Labels": {
                 "io.dev-infra.managed": "true",
                 "io.dev-infra.service": "postgres",
-                "io.dev-infra.instance": str(self.root),
+                "io.dev-infra.instance": str(self.instance.root),
             },
             "Mountpoint": "/isolated/fixture",
         }

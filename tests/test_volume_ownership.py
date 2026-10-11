@@ -50,7 +50,7 @@ class VolumeOwnershipTests(unittest.TestCase):
             {
                 "io.dev-infra.managed": "true",
                 "io.dev-infra.service": "postgres",
-                "io.dev-infra.instance": str(instance or self.root),
+                "io.dev-infra.instance": str(instance or self.instance.root),
                 "io.dev-infra.scope": "18",
             }
             if managed
