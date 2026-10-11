@@ -199,13 +199,13 @@ def catalog(presentation: Presentation):
     return root, parsers
 
 
+def instance_root(preferences):
+    return Path(rf"\\wsl.localhost\{preferences.distro}\opt\dev-infra") if os.name == "nt" else ROOT
+
+
 def config_command(args, preferences, presentation):
     if args.instance or args.versions:
-        root = (
-            Path(rf"\\wsl.localhost\{preferences.distro}\opt\dev-infra")
-            if os.name == "nt"
-            else ROOT
-        )
+        root = instance_root(preferences)
         path = root / ("versions.local.env" if args.versions else ".env")
         initial = (
             "# 本机版本覆盖；使用 upgrade 自动更新。\n"

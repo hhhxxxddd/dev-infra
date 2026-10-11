@@ -33,6 +33,7 @@ class ControllerTests(unittest.TestCase):
         self.docker = FakeDocker(self.instance)
         self.addCleanup(patch.stopall)
         patch.object(cli, "ROOT", self.root).start()
+        patch.object(cli, "instance_root", return_value=self.root).start()
         patch.object(cli, "forward", return_value=None).start()
         patch.object(cli, "Docker", return_value=self.docker).start()
         patch.object(cli, "Registry", FakeRegistry).start()

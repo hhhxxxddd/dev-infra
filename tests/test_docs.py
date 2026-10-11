@@ -1,4 +1,6 @@
+import os
 import re
+import shutil
 import subprocess
 import tomllib
 import unittest
@@ -43,15 +45,36 @@ class DocumentationTests(unittest.TestCase):
                 self.assertIn(command, parsers, f"{path}: {command}")
 
     def test_migration_snippets_have_valid_bash_syntax(self):
-        if not __import__("shutil").which("bash"):
-            self.skipTest("Native Bash unavailable")
+        candidates = []
+        if os.name == "nt":
+            if git := shutil.which("git"):
+                candidates.append(Path(git).resolve().parent.parent / "bin/bash.exe")
+            if program_files := os.environ.get("ProgramFiles"):
+                candidates.append(Path(program_files) / "Git/bin/bash.exe")
+        if configured := shutil.which("bash"):
+            candidates.append(Path(configured))
+        bash = None
+        for candidate in candidates:
+            if not candidate.is_file():
+                continue
+            try:
+                probe = subprocess.run(
+                    [str(candidate), "--version"], capture_output=True, check=False, timeout=10
+                )
+            except OSError, subprocess.TimeoutExpired:
+                continue
+            if probe.returncode == 0 and b"GNU bash" in probe.stdout:
+                bash = str(candidate)
+                break
+        if bash is None:
+            self.skipTest("Working Bash unavailable")
         for language in ("", ".en"):
             path = REPOSITORY / f"docs/upgrades{language}.md"
             for snippet in re.findall(
                 r"```bash\n(.*?)```", path.read_text(encoding="utf-8"), re.DOTALL
             ):
                 result = subprocess.run(
-                    ["bash", "-n"], input=snippet.encode("utf-8"), capture_output=True, check=False
+                    [bash, "-n"], input=snippet.encode("utf-8"), capture_output=True, check=False
                 )
                 self.assertEqual(
                     result.returncode, 0, result.stderr.decode("utf-8", errors="replace")
