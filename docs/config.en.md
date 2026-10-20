@@ -68,6 +68,8 @@ database names, Kafka Cluster ID, S3 bucket, Mailpit retention and the six `*_DA
 `show --secrets` reveals connection declarations. Start or recreate services to apply new ports.
 Password changes require updating database accounts separately; files do not modify existing accounts.
 
+Managed starts, restarts, middleware upgrades and data resets automatically remove the successfully exited `s3-permissions` initializer after S3 starts successfully. S3 still waits for successful initialization; subsequent Compose starts recreate the helper when needed. Cleanup neither removes volumes nor stops running S3. Failed Compose starts or permissions initialization retain the initializer for diagnosis. The `compose` passthrough preserves native Docker Compose behavior.
+
 ## Version overrides
 
 ```text

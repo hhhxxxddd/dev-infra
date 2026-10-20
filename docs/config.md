@@ -64,6 +64,8 @@ Kafka Cluster ID、S3 存储桶、Mailpit 保留数量，以及六个 `*_DATA_VO
 密码与密钥在 `config show --instance` 中隐藏；编辑打开完整文件，`show --secrets` 显示连接声明。
 启动或重建使用新的端口配置。数据库密码变更需先在数据库内同步，配置文件不修改已有账号。
 
+托管启动、重启、中间件升级和数据重置成功启动 S3 后，会自动删除已成功退出的 `s3-permissions` 初始化容器。S3 仍等待权限初始化成功后才启动；后续 Compose 启动会按需重建初始化容器，不删除数据卷或停止正在运行的 S3。Compose 启动或权限初始化失败时保留初始化容器供排查。`compose` 透传保持 Docker Compose 原生行为。
+
 ## 版本覆盖
 
 ```text

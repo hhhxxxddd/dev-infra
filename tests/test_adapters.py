@@ -38,6 +38,38 @@ class AdapterTests(unittest.TestCase):
         self.assertEqual(run.call_args.kwargs["env"]["REDIS_VERSION"], "8.10.2")
         self.assertNotIn("shell", run.call_args.kwargs)
 
+    def test_s3_start_cleans_completed_permissions_before_initializing_the_bucket(self):
+        docker = Docker(self.instance)
+        completed = subprocess.CompletedProcess([], 0, "", "")
+        with patch.object(docker, "compose", return_value=completed) as compose:
+            docker.up(["s3"], 60)
+        calls = compose.call_args_list
+        self.assertEqual([call.args[0] for call in calls], ["up", "rm", "run"])
+        self.assertIn("--wait", calls[0].args)
+        self.assertEqual(calls[1].args, ("rm", "-f", "s3-permissions"))
+        self.assertNotIn("-s", calls[1].args)
+        self.assertNotIn("-v", calls[1].args)
+
+    def test_failed_s3_start_preserves_initializer_for_diagnosis(self):
+        docker = Docker(self.instance)
+        with (
+            patch.object(
+                docker, "compose", side_effect=InfraError("docker_failed|permissions")
+            ) as compose,
+            self.assertRaisesRegex(InfraError, "permissions"),
+        ):
+            docker.up(["s3"], 60, recreate=True)
+        self.assertEqual(compose.call_count, 1)
+        self.assertIn("--force-recreate", compose.call_args.args)
+        self.assertNotIn("rm", compose.call_args.args)
+
+    def test_other_services_do_not_trigger_s3_permissions_cleanup(self):
+        docker = Docker(self.instance)
+        with patch.object(docker, "compose") as compose:
+            docker.up(["redis"], 60)
+        self.assertEqual(compose.call_count, 1)
+        self.assertEqual(compose.call_args.args[-1], "redis")
+
     @unittest.skipUnless(os.name == "posix", "Native WSL locking")
     def test_concurrent_mutations_are_rejected(self):
         with self.instance.lock(), self.assertRaisesRegex(InfraError, "busy"), self.instance.lock():

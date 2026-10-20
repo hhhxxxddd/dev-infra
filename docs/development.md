@@ -63,10 +63,12 @@ Python 3.14，覆盖相同单元、格式和入口语法检查。测试不连接
 
 ```bash
 python3.14 tests/integration/lifecycle.py
+python3.14 tests/integration/s3_permissions.py
 ```
 
 要求 Docker 可用且声明的 Redis 镜像已安装。使用随机 Compose 项目名和临时卷，不暴露宿主
 端口，不下载镜像。验证启动、健康、重建后的数据保留、删除容器保留卷、重置与自动清理。
+S3 测试需要已安装的 RustFS 与客户端镜像，使用随机 Compose 项目和临时卷，不暴露宿主端口；验证权限容器成功后清理、重复启动、停止后启动、服务重建、初始化失败保留与重试，以及数据保留。
 部署后再验证 Windows `-NoProfile` 入口、WSL 入口、语言、JSON、只读升级预览与原有服务健康。
 
 ## 文档

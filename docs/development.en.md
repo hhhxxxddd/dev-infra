@@ -66,6 +66,7 @@ failure cleanup, using an isolated local process instead of an external dump.
 
 ```bash
 python3.14 tests/integration/lifecycle.py
+python3.14 tests/integration/s3_permissions.py
 ```
 
 Requires Docker and the already-installed declared Redis image. Uses a random Compose project
@@ -73,6 +74,8 @@ and temporary volume, no host ports and no image downloads. Checks startup, heal
 after recreate, retained volumes after container removal, reset and cleanup. After deployment,
 verify Windows `-NoProfile`, WSL entrypoints, language, JSON, read-only upgrade plans and existing
 service health.
+
+The S3 test requires installed RustFS and client images. It uses a random Compose project and disposable volume without host ports, checking successful helper cleanup, repeated starts, stop/start, service recreation, failed initialization and retry, and data retention.
 
 ## Documentation
 

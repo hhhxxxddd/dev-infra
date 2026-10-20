@@ -177,6 +177,10 @@ class Docker:
             timeout=wait + 60,
         )
         if "s3" in targets:
+            # Compose has already confirmed the permissions dependency exited 0.
+            # Remove only stopped helpers, retaining volumes and running services.
+            # The dependency is recreated automatically by the next Compose up.
+            self.compose("rm", "-f", "s3-permissions", capture=True, timeout=30)
             self.compose(
                 "run",
                 "--rm",
